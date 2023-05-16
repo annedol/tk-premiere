@@ -317,7 +317,7 @@ class PremiereEngine(sgtk.platform.Engine):
         # which gives something like:
         # Adobe Premiere Version: 2017.1.1 20170425.r.252 2017/04/25:23:00:00 CL 1113967  x64\rNumber of .....
         # and use it instead if available.
-        m = re.search("([0-9]+[\.]?[0-9]*)", unicode(version))
+        m = re.search("([0-9]+[\.]?[0-9]*)", str(version))
         if m:
             cc_version = self.__CC_VERSION_MAPPING.get(math.floor(float(m.group(1))), version)
         return {
@@ -582,8 +582,8 @@ class PremiereEngine(sgtk.platform.Engine):
         # Make sure we have a properly-encoded string for the path. We can
         # possibly get a file path/name that contains unicode, and we don't
         # want to deal with that later on.
-        if isinstance(active_document_path, unicode):
-            active_document_path = active_document_path.encode("utf-8")
+        if active_document_path is not None:
+            active_document_path = sgtk.six.ensure_str(active_document_path)
 
         # This will be True if the context_changes_disabled context manager is
         # used. We're just in a temporary state of not allowing context changes,
@@ -808,7 +808,7 @@ class PremiereEngine(sgtk.platform.Engine):
         try:
             self.logger.debug("Pausing heartbeat...")
             self._HEARTBEAT_DISABLED = True
-        except Exception, e:
+        except Exception as e:
             self.logger.debug("Unable to pause heartbeat as requested.")
             self.logger.error(str(e))
         else:
@@ -975,7 +975,7 @@ class PremiereEngine(sgtk.platform.Engine):
         """
         if not self._WIN32_AFTEREFFECTS_MAIN_HWND:
             for major in sorted(self.__CC_VERSION_MAPPING.keys()):
-                for minor in xrange(10):
+                for minor in range(10):
                     found_hwnds = self.__tk_premiere.win_32_api.find_windows(
                         class_name="Premiere Pro",
                         stop_if_found=True,
@@ -1130,7 +1130,7 @@ class PremiereEngine(sgtk.platform.Engine):
         )
 
         # Note - the base engine implementation will try to clean up
-        # dialogs and widgets after they've been closed.  However this
+        # dialogs and widgets after they've been closed. However, this
         # can cause a crash in Premiere as the system may try to send
         # an event after the dialog has been deleted.
         # Keeping track of all dialogs will ensure this doesn't happen
@@ -1139,7 +1139,7 @@ class PremiereEngine(sgtk.platform.Engine):
         # make python active if possible
         self.__activate_python()
 
-        # make sure the window raised so it doesn't
+        # make sure the window raised, so it doesn't
         # appear behind the main Premiere window
         self.logger.debug("Showing dialog: %s" % (title,))
         dialog.show()
