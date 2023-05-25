@@ -16,6 +16,7 @@ import math
 import subprocess
 import sys
 import threading
+import uuid
 
 
 from contextlib import contextmanager
@@ -23,6 +24,7 @@ from contextlib import contextmanager
 
 import sgtk
 from sgtk.util.filesystem import ensure_folder_exists
+from tank_vendor import six
 
 
 class PremiereEngine(sgtk.platform.Engine):
@@ -74,7 +76,12 @@ class PremiereEngine(sgtk.platform.Engine):
         13: "2016",
         14: "2017",
         15: "2018",
-        16: "2019"
+        16: "2019",
+        17: "2020",
+        18: "2021",
+        22: "2022",
+        23: "2023",
+        24: "2024",
     }
 
     __IS_SEQUENCE_REGEX = re.compile(u"[\[]?([#@]+|[%]0\dd)[\]]?")
@@ -236,7 +243,7 @@ class PremiereEngine(sgtk.platform.Engine):
 
         # Set our parent widget back to being owned by the window manager
         # instead of Premiere's application window.
-        if self._PROXY_WIN_HWND and sys.platform == "win32":
+        if self._PROXY_WIN_HWND and sgtk.util.is_windows():
             self.__tk_premiere.win_32_api.SetParent(self._PROXY_WIN_HWND, 0)
 
         # No longer poll for new messages from this engine.
@@ -583,7 +590,7 @@ class PremiereEngine(sgtk.platform.Engine):
         # possibly get a file path/name that contains unicode, and we don't
         # want to deal with that later on.
         if active_document_path is not None:
-            active_document_path = sgtk.six.ensure_str(active_document_path)
+            active_document_path = six.ensure_str(active_document_path)
 
         # This will be True if the context_changes_disabled context manager is
         # used. We're just in a temporary state of not allowing context changes,
@@ -902,8 +909,8 @@ class PremiereEngine(sgtk.platform.Engine):
             This is only done in windows.
             TODO: Implement an equivalent method on mac
         """
-        if sys.platform == "win32":
-
+        # if sys.platform == "win32":
+        if sgtk.util.is_windows():
             # to get all dialogs from Premiere, we have to query the
             # Premiere process id first. As this code runs inside a
             # separate python process, we use a subprocess for this.
@@ -915,10 +922,12 @@ class PremiereEngine(sgtk.platform.Engine):
                 # instance of Premiere, this should be safe to determine the
                 # process id.
                 pid_query_process = subprocess.Popen(
-                    ['tasklist', '/FI', 'ImageName eq Premiere.exe', '/FO', 'CSV', '/NH'],
+                    ['tasklist', '/FI', 'ImageName eq Adobe Premiere Pro.exe', '/FO', 'CSV', '/NH'],
                     stdout=subprocess.PIPE
                 )
                 out_string, _ = pid_query_process.communicate()
+
+                out_string = out_string.decode('utf-8')
 
                 # The out_string will look like:
                 # "AfterFX.ext","1234","SessionName","SessionNum","MemoryUsage"
@@ -953,7 +962,6 @@ class PremiereEngine(sgtk.platform.Engine):
             # by comparing the cached hwnd longs with the current list of hwnd longs,
             # we find out which hwnds are actually pointing to new (unraised) dialogs.
             new_hwnds = set(all_hwnds.keys()) - (self._POPUP_CACHE or set([]))
-
             # in case there is a new dialog, we bring it to front and update the cache
             for hwnd_long in new_hwnds:
                 self.__tk_premiere.win_32_api.bring_to_front(all_hwnds[hwnd_long])
@@ -1005,7 +1013,7 @@ class PremiereEngine(sgtk.platform.Engine):
 
             # Create the proxy QWidget.
             win32_proxy_win = QtGui.QWidget()
-            window_title = "Shotgun Toolkit Parent Widget"
+            window_title = "ShotGrid Parent Widget {0}".format(uuid.uuid4().hex)
             win32_proxy_win.setWindowTitle(window_title)
 
             # We have to take different approaches depending on whether
@@ -1028,10 +1036,15 @@ class PremiereEngine(sgtk.platform.Engine):
                 win32_proxy_win.show()
 
                 try:
-                    proxy_win_hwnd_found = self.__tk_premiere.win_32_api.find_windows(
-                        stop_if_found=True,
-                        class_name="Qt5QWindowIcon",
-                        process_id=os.getpid(),
+                    # proxy_win_hwnd_found = self.__tk_premiere.win_32_api.find_windows(
+                    #     stop_if_found=True,
+                    #     class_name="Qt5QWindowIcon",
+                    #     process_id=os.getpid(),
+                    # )
+                    proxy_win_hwnd_found = (
+                        self.__tk_premiere.win_32_api.find_windows(
+                            stop_if_found=True, window_text=window_title
+                        )
                     )
                 finally:
                     win32_proxy_win.hide()
@@ -1043,6 +1056,7 @@ class PremiereEngine(sgtk.platform.Engine):
                 "Unable to determine the HWND of Premiere itself. This means "
                 "that we can't properly setup window parenting for Toolkit apps."
             )
+        self.logger.debug(f"PROXY WIN HWND = {proxy_win_hwnd}")
 
         # Parent to the Premiere application window if we found everything
         # we needed. If we didn't find our proxy window for some reason, we
@@ -1087,7 +1101,7 @@ class PremiereEngine(sgtk.platform.Engine):
         from tank.platform.qt import QtGui
 
         if not self._DIALOG_PARENT:
-            if sys.platform == "win32":
+            if sgtk.util.is_windows():
                 # for windows, we create a proxy window parented to the
                 # main application window that we can then set as the owner
                 # for all Toolkit dialogs
@@ -1305,7 +1319,7 @@ class PremiereEngine(sgtk.platform.Engine):
 
         # iterate over all the registered commands and gather the necessary info
         # to display them in adobe
-        for (command_name, command_info) in self.commands.iteritems():
+        for (command_name, command_info) in self.commands.items():
 
             # commands come with a dict of properties that may or may not
             # contain certain data.
@@ -1478,7 +1492,7 @@ class PremiereEngine(sgtk.platform.Engine):
                 cmd = "xdg-open \"%s\"" % disk_location
             elif system == "darwin":
                 cmd = "open \"%s\"" % disk_location
-            elif system == "win32":
+            elif sgtk.util.is_windows():
                 cmd = "cmd.exe /C start \"Folder\" \"%s\"" % disk_location
             else:
                 raise Exception("Platform '%s' is not supported." % system)
@@ -1729,6 +1743,6 @@ class PremiereEngine(sgtk.platform.Engine):
             status = subprocess.call(cmd)
             if status:
                 self.logger.error("Could not activate python.")
-        elif sys.platform == "win32":
+        elif sgtk.util.is_windows():
             pass
             

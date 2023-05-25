@@ -120,7 +120,7 @@ class PremiereActions(HookBaseClass):
             self.execute_action(name, params, sg_publish_data)
     
     def _get_path_from_sg_publish_data(self, sg_publish_data):
-        return self.get_publish_path(sg_publish_data).decode('utf-8')
+        return self.get_publish_path(sg_publish_data)
 
     def execute_action(self, name, params, sg_publish_data):
         """
