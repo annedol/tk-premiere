@@ -83,6 +83,13 @@ class ContextFieldsDisplay(HookBaseClass):
                 "project",
                 "content",
             ])
+        elif entity_type == "Episode":
+            fields = base_fields
+            fields.extend([
+                "sg_division",
+                "code",
+                "project"
+            ])
 
         else:
             fields = std_fields

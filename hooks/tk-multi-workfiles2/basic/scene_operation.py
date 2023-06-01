@@ -21,7 +21,7 @@ def get_default_premiere_project(shotgun):
                 ['published_file_type', 'is', {'type': 'PublishedFileType', 'id':208}]
             ]
 
-    order = [{'field_name': 'version_number', 'direction':'desc'}]
+    order = [{'field_name': 'version_number', 'direction': 'desc'}]
 
     fields = ['name', 'path', 'version_number', 'task', 'sg_status_list', 'task.Task.step', 'published_file_type']
 

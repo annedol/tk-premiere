@@ -1,36 +1,45 @@
-# Copyright (c) 2019 Shotgun Software Inc.
-# 
+# Copyright (c) 2017 Shotgun Software Inc.
+#
 # CONFIDENTIAL AND PROPRIETARY
-# 
-# This work is provided "AS IS" and subject to the Shotgun Pipeline Toolkit 
+#
+# This work is provided "AS IS" and subject to the Shotgun Pipeline Toolkit
 # Source Code License included in this distribution package. See LICENSE.
-# By accessing, using, copying or modifying this work you indicate your 
-# agreement to the Shotgun Pipeline Toolkit Source Code License. All rights 
+# By accessing, using, copying or modifying this work you indicate your
+# agreement to the Shotgun Pipeline Toolkit Source Code License. All rights
 # not expressly granted therein are reserved by Shotgun Software Inc.
+
 import os
-
-
+import pprint
+import tempfile
+import uuid
+import sys
 import sgtk
 
+from tank_vendor import six
 
 HookBaseClass = sgtk.get_hook_baseclass()
 
 
-class ProjectUnsavedError(Exception):
-    pass
-
-
-class PremiereProjectPublishPlugin(HookBaseClass):
+class PremiereUploadVersionPlugin(HookBaseClass):
     """
-    Plugin for publishing a premiere project.
-
-    This hook relies on functionality found in the base file publisher hook in
-    the publish2 app and should inherit from it in the configuration. The hook
-    setting for this plugin should look something like this::
-
-        hook: "{self}/publish_file.py:{engine}/tk-multi-publish2/basic/publish_document.py"
-
+    Plugin for sending photoshop documents to shotgun for review.
     """
+
+    @property
+    def icon(self):
+        """
+        Path to an png icon on disk
+        """
+
+        # look for icon one level up from this hook's folder in "icons" folder
+        return os.path.join(self.disk_location, os.pardir, "icons", "review.png")
+
+    @property
+    def name(self):
+        """
+        One line display name describing the plugin
+        """
+        return "Upload for review"
 
     @property
     def description(self):
@@ -38,50 +47,26 @@ class PremiereProjectPublishPlugin(HookBaseClass):
         Verbose, multi-line description of what the plugin does. This can
         contain simple html for formatting.
         """
+        publisher = self.parent
 
-        loader_url = "https://support.shotgunsoftware.com/hc/en-us/articles/219033078"
+        shotgun_url = publisher.sgtk.shotgun_url
+
+        media_page_url = "%s/page/media_center" % (shotgun_url,)
+        mobile_url = "https://help.autodesk.com/view/SGSUB/ENU/?guid=SG_Supervisor_Artist_sa_mobile_review_html"
+        rv_url = "https://help.autodesk.com/view/SGSUB/ENU/?guid=SG_RV_rv_manuals_rv_easy_setup_html"
 
         return """
-        Publishes the project file to Shotgun. A <b>Publish</b> entry will be
-        created in Shotgun which will include a reference to the file's current
-        path on disk. Other users will be able to access the published file via
-        the <b><a href='%s'>Loader</a></b> so long as they have access to
-        the file's location on disk.
+        Upload the file to ShotGrid for review.<br><br>
 
-        If the project has not been saved, validation will fail and a button
-        will be provided in the logging output to save the file.
-
-        <h3>File versioning</h3>
-        If the filename contains a version number, the process will bump the
-        file to the next version after publishing.
-
-        The <code>version</code> field of the resulting <b>Publish</b> in
-        Shotgun will also reflect the version number identified in the filename.
-        The basic worklfow recognizes the following version formats by default:
-
-        <ul>
-        <li><code>filename.v###.ext</code></li>
-        <li><code>filename_v###.ext</code></li>
-        <li><code>filename-v###.ext</code></li>
-        </ul>
-
-        After publishing, if a version number is detected in the file, the file
-        will automatically be saved to the next incremental version number.
-        For example, <code>filename.v001.ext</code> will be published and copied
-        to <code>filename.v002.ext</code>
-
-        If the next incremental version of the file already exists on disk, the
-        validation step will produce a warning, and a button will be provided in
-        the logging output which will allow saving the project to the next
-        available version number prior to publishing.
-
-        <br><br><i>NOTE: any amount of version number padding is supported.</i>
-
-        <h3>Overwriting an existing publish</h3>
-        A file can be published multiple times however only the most recent
-        publish will be available to other users. Warnings will be provided
-        during validation if there are previous publishes.
-        """ % (loader_url,)
+        A <b>Version</b> entry will be created in ShotGrid and a transcoded
+        copy of the file will be attached to it. The file can then be reviewed
+        via the project's <a href='%s'>Media</a> page, <a href='%s'>RV</a>, or
+        the <a href='%s'>ShotGrid Review</a> mobile app.
+        """ % (
+            media_page_url,
+            rv_url,
+            mobile_url,
+        )
 
     @property
     def settings(self):
@@ -102,11 +87,10 @@ class PremiereProjectPublishPlugin(HookBaseClass):
         The type string should be one of the data types that toolkit accepts as
         part of its environment configuration.
         """
+        base_settings = \
+            super(PremiereUploadVersionPlugin, self).settings or {}
 
         # inherit the settings from the base publish plugin
-        base_settings = \
-            super(PremiereProjectPublishPlugin, self).settings or {}
-
         # settings specific to this class
         premiere_publish_settings = {
             "Publish Template": {
@@ -161,7 +145,7 @@ class PremiereProjectPublishPlugin(HookBaseClass):
         """
         path = self.parent.engine.project_path
 
-        # if a publish template is configured, disable context change. 
+        # if a publish template is configured, disable context change.
         if settings.get("Publish Template").value:
             item.context_change_allowed = False
 
@@ -243,35 +227,6 @@ class PremiereProjectPublishPlugin(HookBaseClass):
         else:
             self.logger.debug("No work template configured.")
 
-            # ---- see if the version can be bumped post-publish
-
-        # check to see if the next version of the work file already exists on
-        # disk. if so, warn the user and provide the ability to jump to save
-        # to that version now
-        (next_version_path, version) = self._get_next_version_info(path,
-                                                                   item)
-        if next_version_path and os.path.exists(next_version_path):
-
-            # determine the next available version_number. just keep asking for
-            # the next one until we get one that doesn't exist.
-            while os.path.exists(next_version_path):
-                (next_version_path, version) = self._get_next_version_info(
-                    next_version_path, item)
-
-            error_msg = "The next version of this file already exists on disk."
-            self.logger.error(
-                error_msg,
-                extra={
-                    "action_button": {
-                        "label": "Save to v%s" % (version,),
-                        "tooltip": "Save to the next available version number, "
-                                   "v%s" % (version,),
-                        "callback": lambda: self.parent.engine.save(next_version_path)
-                    }
-                }
-            )
-            raise ProjectUnsavedError(error_msg)
-
         # ---- populate the necessary properties and call base class validation
 
         # populate the publish template on the item if found
@@ -288,7 +243,7 @@ class PremiereProjectPublishPlugin(HookBaseClass):
         item.properties["path"] = path
 
         # run the base class validation
-        return super(PremiereProjectPublishPlugin, self).validate(
+        return super(PremiereUploadVersionPlugin, self).validate(
             settings, item)
 
     def publish(self, settings, item):
@@ -307,23 +262,92 @@ class PremiereProjectPublishPlugin(HookBaseClass):
         if publish_template:
             item.properties["publish_template"] = publish_template
 
-        path = self.parent.engine.project_path
+        publisher = self.parent
+        name = item.name.split('.')[0]
+        version = item.name.split('.')[1]
+        version = int(version.replace('v', ''))
 
-        # get the path in a normalized state. no trailing separator, separators
-        # are appropriate for current os, no double separators, etc.
-        path = sgtk.util.ShotgunPath.normalize(path)
+        template = item.properties['publish_template']
+        fields = item.context.as_template_fields(template)
+        fields['name'] = name
+        fields['version'] = version
+        path_to_movie = template.apply_fields(fields)
 
-        self.parent.engine.save()
+        preset = r"C:\Program Files\Adobe\Adobe Premiere Pro 2023\Settings\EncoderPresets\ConsolidateAndTranscode\Match Source - DNxHD.epr"
+        self.parent.engine.adobe.app.project.activeSequence.exportAsMediaDirect(
+            path_to_movie,
+            preset,
+            2
+        )
+
+        if path_to_movie is None:
+            self.logger.error("No render path found")
+            return
+
+        # use the path's filename as the publish name
+        path_components = publisher.util.get_file_path_components(
+            path_to_movie
+        )
+        publish_name = path_components["filename"]
+
+        # populate the version data to send to SG
+        self.logger.info("Creating Version...")
+        version_data = {
+            "project": item.context.project,
+            "code": publish_name,
+            "description": item.description,
+            "entity": self._get_version_entity(item),
+            "sg_task": item.context.task,
+            "sg_path_to_movie": path_to_movie,
+        }
 
         # update the item with the saved project path
-        item.properties["path"] = path
-        item.properties["publish_type"] = "Premiere Project"
+        item.properties["path"] = path_to_movie
+        item.properties["publish_type"] = "Rendered Image"
+        item.properties["sg_publish_data"]["upstream_published_files"] = self._get_version_entity(item)
 
         # let the base class register the publish
-        super(PremiereProjectPublishPlugin, self).publish(settings, item)
+        super(PremiereUploadVersionPlugin, self).publish(settings, item)
 
-        published_renderings = item.properties.get("published_renderings", [])
-        published_renderings.insert(0, item.properties.get("sg_publish_data"))
+        publish_data = item.properties.get("sg_publish_data")
+        rendering_data = item.properties.get("published_renderings", [])
+
+        # if the file was published, add the publish data to the version
+        version_data["published_files"] = []
+        if publish_data:
+            version_data["published_files"].append(publish_data)
+        version_data["published_files"].extend(rendering_data)
+
+        # log the version data for debugging
+        self.logger.debug(
+            "Populated Version data...",
+            extra={
+                "action_show_more_info": {
+                    "label": "Version Data",
+                    "tooltip": "Show the complete Version data dictionary",
+                    "text": "<pre>%s</pre>" % (pprint.pformat(version_data),),
+                }
+            },
+        )
+
+        # create the version
+        self.logger.info("Creating version for review...")
+        version = self.parent.shotgun.create("Version", version_data)
+
+        # stash the version info in the item just in case
+        item.properties["sg_version_data"] = version
+
+        # Ensure the path is utf-8 encoded to avoid issues with the Shotgun API.
+        upload_path = six.ensure_str(path_to_movie)
+
+        # upload the file to SG
+        self.logger.info("Uploading content...")
+        self.parent.shotgun.upload(
+            "Version", version["id"], upload_path, "sg_uploaded_movie"
+        )
+        self.logger.info("Upload complete!")
+
+        item.properties["upload_path"] = upload_path
 
     def finalize(self, settings, item):
         """
@@ -337,20 +361,7 @@ class PremiereProjectPublishPlugin(HookBaseClass):
         """
 
         # do the base class finalization
-        super(PremiereProjectPublishPlugin, self).finalize(settings, item)
-
-        path = self.parent.engine.project_path
-        path = sgtk.util.ShotgunPath.normalize(path)
-        item.properties["path"] = path
-
-        path = item.properties["path"]
-
-        # bump the project path to the next version
-        self._save_to_next_version(
-            path,
-            item,
-            lambda path, e=self.parent.engine: e.save(path)
-        )
+        super(PremiereUploadVersionPlugin, self).finalize(settings, item)
 
     def _get_version_entity(self, item):
         """
@@ -387,5 +398,3 @@ class PremiereProjectPublishPlugin(HookBaseClass):
                 "callback": callback
             }
         }
-
-
