@@ -16,3 +16,9 @@ make.bat
 # Sublime
 *.sublime-project
 *.sublime-workspace
+
+.idea/
+icon_256_1.png
+Adobe Premiere Pro Auto-Save/
+tk-premiere.zip
+tk-premiere_1.zip

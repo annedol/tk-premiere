@@ -256,7 +256,7 @@ class PremiereUploadEDLPlugin(HookBaseClass):
 
         name = item.name.split('.')[0]
         version = item.name.split('.')[1]
-        version = int(version.replace('v', ''))
+        version = int(re.findall(r'[0-9]{3}', name)[-1])
 
         template = item.properties['publish_template']
         fields = item.context.as_template_fields(template)
