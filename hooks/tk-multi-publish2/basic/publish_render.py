@@ -265,8 +265,9 @@ class PremiereUploadVersionPlugin(HookBaseClass):
 
         publisher = self.parent
         name = item.name.split('.')[0]
-        version = item.name.split('.')[1]
-        version = int(re.findall(r'[0-9]{3}', name)[-1])
+        # version = item.name.split('.')[1]
+        version = re.findall(r'v[0-9]+', item.name)[-1]
+        version = int(re.findall(r'[0-9]+', version)[-1])
 
         template = item.properties['publish_template']
         fields = item.context.as_template_fields(template)
